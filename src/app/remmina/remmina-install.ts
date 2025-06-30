@@ -1,18 +1,15 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
 
 // Configuration des dépendances
 export function getConfig() {
   return {
     name: "Remmina",
-    dependencies: [], // Remmina n'a pas de dépendances particulières
+    dependencies: [],
   };
 }
 
 export default async function installRemmina() {
-  await installSystemPackage({
-    name: "Remmina",
-    packageManager: "pacman",
-    packageName: "remmina",
+  await installSmartPackage("Remmina", "remmina", {
     successMessage: "Remmina installed successfully 🖥️🔗",
   });
 }

@@ -1,4 +1,4 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
 
 // Configuration des dépendances
 export function getConfig() {
@@ -9,10 +9,7 @@ export function getConfig() {
 }
 
 export default async function installStow() {
-  await installSystemPackage({
-    name: "Stow",
-    packageManager: "pacman",
-    packageName: "stow",
+  await installSmartPackage("Stow", "stow", {
     successMessage: "Stow successfully installed 📦🔗",
   });
 }

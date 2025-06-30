@@ -1,10 +1,15 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
+
+// Configuration des dépendances
+export function getConfig() {
+  return {
+    name: "Discord",
+    dependencies: [],
+  };
+}
 
 export default async function installDiscord() {
-  await installSystemPackage({
-    name: "Discord",
-    packageName: "discord",
-    packageManager: "pacman", // Essaie pacman d'abord
+  await installSmartPackage("Discord", "discord", {
     successMessage: "Discord installed successfully 💬🎮",
   });
 }

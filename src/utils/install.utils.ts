@@ -3,6 +3,16 @@
  */ import { $, spawn } from "bun";
 import { log } from "@clack/prompts";
 import * as p from "@clack/prompts";
+import {
+  getDistroInfo,
+  resolvePackageName,
+  generateInstallCommand,
+  isPackageInstalledOnDistro,
+} from "./distro.utils";
+import {
+  getPackageConfig,
+  UNIVERSAL_INSTALL_PACKAGES,
+} from "../config/packages.config";
 
 // Variable globale pour gérer le cache sudo
 let sudoCacheActive = false;
@@ -18,11 +28,13 @@ export interface InstallConfig {
 
 export interface PackageManagerConfig {
   name: string;
-  packageName: string;
-  packageManager: "pacman" | "paru" | "apt" | "yum" | "dnf";
+  packageName?: string;
+  packageKey?: string; // Clé dans la configuration des packages
+  packageManager?: "pacman" | "paru" | "apt" | "yum" | "dnf" | "apk";
   dependencies?: string[]; // Ajout des dépendances
   additionalFlags?: string[];
   successMessage?: string;
+  forcePackageManager?: boolean; // Force l'utilisation du gestionnaire spécifié
 }
 
 /**
@@ -238,7 +250,7 @@ export async function installPackage(config: InstallConfig): Promise<void> {
 }
 
 /**
- * Installation via gestionnaire de paquets système
+ * Installation via gestionnaire de paquets système (multi-distribution)
  */
 export async function installSystemPackage(
   config: PackageManagerConfig,
@@ -246,30 +258,102 @@ export async function installSystemPackage(
   const {
     name,
     packageName,
+    packageKey,
     packageManager,
     additionalFlags = [],
     successMessage,
+    forcePackageManager = false,
   } = config;
 
   try {
     log.info(`Checking ${name}...`);
 
-    if (await isPackageInstalled(packageManager, packageName)) {
+    // Détecter la distribution
+    const distroInfo = await getDistroInfo();
+    log.info(
+      `📋 Detected distribution: ${distroInfo.name} (${distroInfo.family})`,
+    );
+
+    let resolvedPackageName: string | undefined;
+    let resolvedPackageManager: string;
+    let alternativeInstallMethod:
+      | { checkCommand: string; installCommand: string }
+      | undefined;
+
+    // Si on a une clé de package, utiliser la configuration
+    if (packageKey) {
+      const packageConfig = getPackageConfig(packageKey);
+      if (packageConfig) {
+        // Vérifier si c'est un package universel
+        if (UNIVERSAL_INSTALL_PACKAGES[packageKey]) {
+          const universalPackage = UNIVERSAL_INSTALL_PACKAGES[packageKey];
+          return await installPackage({
+            name,
+            checkCommand: universalPackage.checkCommand,
+            installCommand: universalPackage.installCommand,
+            successMessage,
+          });
+        }
+
+        // Résoudre selon la distribution
+        const resolved = resolvePackageName(packageConfig, distroInfo.family);
+        if (resolved) {
+          resolvedPackageName = resolved.packageName;
+          resolvedPackageManager =
+            resolved.packageManager || distroInfo.packageManager;
+          alternativeInstallMethod = resolved.alternativeInstallMethod;
+        }
+      }
+    }
+
+    // Fallback aux paramètres fournis
+    if (!resolvedPackageName && packageName) {
+      resolvedPackageName = packageName;
+    }
+    if (!resolvedPackageManager) {
+      resolvedPackageManager = packageManager || distroInfo.packageManager;
+    }
+
+    // Si on a une méthode d'installation alternative, l'utiliser
+    if (alternativeInstallMethod) {
+      log.info(`Using alternative installation method for ${name}...`);
+      return await installPackage({
+        name,
+        checkCommand: alternativeInstallMethod.checkCommand,
+        installCommand: alternativeInstallMethod.installCommand,
+        successMessage,
+      });
+    }
+
+    // Vérifier si le package n'est pas déjà installé
+    if (
+      resolvedPackageName &&
+      (await isPackageInstalledOnDistro(resolvedPackageName, distroInfo))
+    ) {
       log.success(`${name} is already installed ✅`);
       return;
     }
 
-    // Activer le cache sudo si nécessaire
-    const installCmd = getInstallCommand(
-      packageManager,
-      packageName,
-      additionalFlags,
+    if (!resolvedPackageName) {
+      throw new Error(
+        `Package configuration not found for ${name} on ${distroInfo.family}`,
+      );
+    }
+
+    // Générer la commande d'installation
+    const installCmd = generateInstallCommand(
+      resolvedPackageManager,
+      resolvedPackageName,
+      [...distroInfo.packageManagerInstallFlags, ...additionalFlags],
     );
+
+    // Activer le cache sudo si nécessaire
     if (installCmd.includes("sudo") && !sudoCacheActive) {
       await enableSudoCache();
     }
 
-    log.info(`Installing ${name} via ${packageManager}...`);
+    log.info(`Installing ${name} via ${resolvedPackageManager}...`);
+    log.info(`📦 Package: ${resolvedPackageName}`);
 
     // Exécuter avec support d'interaction
     await runInteractiveCommand(installCmd);
@@ -287,26 +371,51 @@ export async function installSystemPackage(
 
 /**
  * Génère la commande d'installation selon le gestionnaire de paquets
+ * @deprecated Use generateInstallCommand from distro.utils instead
  */
 function getInstallCommand(
   packageManager: string,
   packageName: string,
   additionalFlags: string[],
 ): string {
-  const flags = additionalFlags.join(" ");
+  const flags =
+    additionalFlags.length > 0 ? additionalFlags.join(" ") + " " : "";
 
   switch (packageManager) {
     case "pacman":
-      return `sudo pacman -S --noconfirm ${flags} ${packageName}`;
+      return `sudo pacman -S --noconfirm ${flags}${packageName}`;
     case "paru":
-      return `paru -S --noconfirm ${flags} ${packageName}`;
+      return `paru -S --noconfirm ${flags}${packageName}`;
     case "apt":
-      return `sudo apt install -y ${flags} ${packageName}`;
+      return `sudo apt install -y ${flags}${packageName}`;
     case "yum":
-      return `sudo yum install -y ${flags} ${packageName}`;
+      return `sudo yum install -y ${flags}${packageName}`;
     case "dnf":
-      return `sudo dnf install -y ${flags} ${packageName}`;
+      return `sudo dnf install -y ${flags}${packageName}`;
     default:
       throw new Error(`Unsupported package manager: ${packageManager}`);
   }
+}
+
+/**
+ * Installation intelligente qui détecte automatiquement la meilleure méthode
+ */
+export async function installSmartPackage(
+  name: string,
+  packageKey: string,
+  options: {
+    successMessage?: string;
+    additionalFlags?: string[];
+    dependencies?: string[];
+  } = {},
+): Promise<void> {
+  const { successMessage, additionalFlags = [], dependencies = [] } = options;
+
+  await installSystemPackage({
+    name,
+    packageKey,
+    additionalFlags,
+    successMessage,
+    dependencies,
+  });
 }

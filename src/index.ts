@@ -61,19 +61,34 @@ async function executeInstallations(selectedTools: string[]): Promise<void> {
     // 1. Charger les configurations de tous les packages sélectionnés
     const packageConfigs = await loadPackageConfigurations(selectedTools);
 
-    // 2. Résoudre l'ordre d'installation selon les dépendances
-    const installOrder = resolveDependencyOrder(packageConfigs);
+    // 2. Collecter toutes les dépendances nécessaires
+    const allRequiredPackages = await collectAllDependencies(
+      selectedTools,
+      packageConfigs,
+    );
+
+    // 3. Résoudre l'ordre d'installation selon les dépendances
+    const installOrder = resolveDependencyOrder(allRequiredPackages);
 
     p.log.info(`📋 Installation order: ${installOrder.join(" → ")}`);
 
-    // 3. Installer dans l'ordre résolu
+    // 4. Installer dans l'ordre résolu (seulement les packages disponibles)
     for (const packageName of installOrder) {
       const toolFile = selectedTools.find(
         (tool) => getToolName(tool).toLowerCase() === packageName.toLowerCase(),
       );
 
       if (!toolFile) {
-        p.log.warning(`⚠️ Skipping ${packageName} (not in selection)`);
+        // Vérifier si c'est une dépendance disponible
+        const dependencyToolFile = await findDependencyToolFile(packageName);
+        if (dependencyToolFile) {
+          p.log.info(`📦 Installing dependency: ${packageName}`);
+          await installSinglePackage(dependencyToolFile);
+        } else {
+          p.log.warning(
+            `⚠️ Skipping ${packageName} (dependency not available)`,
+          );
+        }
         continue;
       }
 
@@ -118,6 +133,99 @@ async function loadPackageConfigurations(selectedTools: string[]) {
   }
 
   return configs;
+}
+
+/**
+ * Collecte toutes les dépendances nécessaires (récursivement)
+ */
+async function collectAllDependencies(
+  selectedTools: string[],
+  packageConfigs: any[],
+) {
+  const allPackages = [...packageConfigs];
+  const processedDeps = new Set<string>();
+
+  // Ajouter les dépendances récursivement
+  for (const config of packageConfigs) {
+    if (config.dependencies) {
+      await addDependenciesRecursively(
+        config.dependencies,
+        allPackages,
+        processedDeps,
+      );
+    }
+  }
+
+  return allPackages;
+}
+
+/**
+ * Ajoute les dépendances récursivement
+ */
+async function addDependenciesRecursively(
+  dependencies: string[],
+  allPackages: any[],
+  processedDeps: Set<string>,
+) {
+  for (const depName of dependencies) {
+    if (processedDeps.has(depName.toLowerCase())) continue;
+
+    processedDeps.add(depName.toLowerCase());
+
+    // Essayer de charger la configuration de la dépendance
+    try {
+      const depToolFile = await findDependencyToolFile(depName);
+      if (depToolFile) {
+        const depInstallPath = getInstallPath(depToolFile);
+        const depModule = await import(depInstallPath);
+        const depConfig = depModule.getConfig
+          ? depModule.getConfig()
+          : { name: depName };
+
+        allPackages.push(depConfig);
+
+        // Ajouter les dépendances de cette dépendance
+        if (depConfig.dependencies) {
+          await addDependenciesRecursively(
+            depConfig.dependencies,
+            allPackages,
+            processedDeps,
+          );
+        }
+      } else {
+        // Dépendance non trouvée, ajouter comme package simple
+        allPackages.push({ name: depName });
+      }
+    } catch (error) {
+      // En cas d'erreur, ajouter comme package simple
+      allPackages.push({ name: depName });
+    }
+  }
+}
+
+/**
+ * Trouve le fichier d'installation d'une dépendance
+ */
+async function findDependencyToolFile(depName: string): Promise<string | null> {
+  const possibleFileName = `${depName.toLowerCase()}-install.ts`;
+  const possiblePath = join(
+    import.meta.dir,
+    "../src/app",
+    depName.toLowerCase(),
+    possibleFileName,
+  );
+
+  try {
+    // Vérifier si le fichier existe
+    const file = Bun.file(possiblePath);
+    if (await file.exists()) {
+      return possibleFileName;
+    }
+  } catch (error) {
+    // Fichier non trouvé
+  }
+
+  return null;
 }
 
 /**

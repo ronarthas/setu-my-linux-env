@@ -1,18 +1,15 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
 
 // Configuration des dépendances
 export function getConfig() {
   return {
-    name: "PyCharm",
-    dependencies: ["python"], // PyCharm dépend de Python
+    name: "Pycharm",
+    dependencies: ["python"],
   };
 }
 
-export default async function installPyCharm() {
-  await installSystemPackage({
-    name: "PyCharm",
-    packageManager: "paru",
-    packageName: "pycharm-community-edition",
+export default async function installPycharm() {
+  await installSmartPackage("Pycharm", "pycharm-community", {
     successMessage: "PyCharm Community installed successfully 🐍💻",
   });
 }

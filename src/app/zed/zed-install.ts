@@ -1,10 +1,15 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
+
+// Configuration des dépendances
+export function getConfig() {
+  return {
+    name: "Zed",
+    dependencies: [],
+  };
+}
 
 export default async function installZed() {
-  await installSystemPackage({
-    name: "Zed",
-    packageName: "zed",
-    packageManager: "pacman",
+  await installSmartPackage("Zed", "zed", {
     successMessage: "Zed editor installed successfully 📝✨",
   });
 }

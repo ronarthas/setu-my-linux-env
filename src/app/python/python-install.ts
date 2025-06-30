@@ -1,4 +1,4 @@
-import { installSystemPackage } from "../../utils/install.utils";
+import { installSmartPackage } from "../../utils/install.utils";
 
 // Configuration des dépendances
 export function getConfig() {
@@ -9,10 +9,7 @@ export function getConfig() {
 }
 
 export default async function installPython() {
-  await installSystemPackage({
-    name: "Python",
-    packageManager: "pacman",
-    packageName: "python",
+  await installSmartPackage("Python", "python", {
     successMessage: "Python installed successfully 🐍✨",
   });
 }
