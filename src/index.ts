@@ -2,6 +2,11 @@ import * as p from "@clack/prompts";
 import color from "picocolors";
 import { generateOptionsFromFolders } from "./utils/files.utils";
 import { enableSudoCache, resolveDependencyOrder } from "./utils/install.utils";
+import {
+  runSystemDiagnostic,
+  displayDiagnosticResults,
+  quickDiagnostic,
+} from "./utils/diagnostic.utils";
 import { join } from "node:path";
 
 async function main() {
@@ -14,41 +19,71 @@ async function main() {
   p.intro(`${color.bgCyan(color.black(" Setup Arch Package "))}`);
 
   const project = await p.group({
-    tools: () =>
-      p.multiselect({
-        message: "Select app to install",
-        options: app,
+    action: () =>
+      p.select({
+        message: "What would you like to do?",
+        options: [
+          { value: "install", label: "📦 Install packages" },
+          { value: "diagnostic", label: "🔍 Run system diagnostic" },
+          { value: "quick-check", label: "⚡ Quick system check" },
+        ],
       }),
-    install: () =>
-      p.confirm({
-        message: "Install all Package?",
-        initialValue: false,
-      }),
+    tools: ({ results }) =>
+      results.action === "install"
+        ? p.multiselect({
+            message: "Select app to install",
+            options: app,
+          })
+        : undefined,
+    install: ({ results }) =>
+      results.action === "install" && results.tools && results.tools.length > 0
+        ? p.confirm({
+            message: "Install all Package?",
+            initialValue: false,
+          })
+        : undefined,
   });
 
-  if (project.install && project.tools && project.tools.length > 0) {
-    // Demander le mot de passe sudo une seule fois au début
-    try {
-      await enableSudoCache();
-    } catch (error) {
-      p.log.error("Sudo access required for installations");
-      return;
-    }
+  switch (project.action) {
+    case "install":
+      if (project.install && project.tools && project.tools.length > 0) {
+        // Demander le mot de passe sudo une seule fois au début
+        try {
+          await enableSudoCache();
+        } catch (error) {
+          p.log.error("Sudo access required for installations");
+          return;
+        }
 
-    const s = p.spinner();
-    s.start("Starting installations...");
+        const s = p.spinner();
+        s.start("Starting installations...");
 
-    try {
-      await executeInstallations(project.tools as string[]);
-      s.stop("All installations completed! ✅");
-    } catch (error) {
-      s.stop("Installation failed ❌");
-      p.log.error(`Installation error: ${error}`);
-    }
-  } else if (!project.install) {
-    p.log.info("Installation cancelled");
-  } else {
-    p.log.warning("No tools selected");
+        try {
+          await executeInstallations(project.tools as string[]);
+          s.stop("All installations completed! ✅");
+        } catch (error) {
+          s.stop("Installation failed ❌");
+          p.log.error(`Installation error: ${error}`);
+        }
+      } else if (!project.install) {
+        p.log.info("Installation cancelled");
+      } else {
+        p.log.warning("No tools selected");
+      }
+      break;
+
+    case "diagnostic":
+      p.log.info("🔍 Running full system diagnostic...");
+      const diagnostic = await runSystemDiagnostic();
+      displayDiagnosticResults(diagnostic);
+      break;
+
+    case "quick-check":
+      await quickDiagnostic();
+      break;
+
+    default:
+      p.log.info("No action selected");
   }
 }
 
